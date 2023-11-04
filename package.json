@@ -1,0 +1,17 @@
+{
+  "name": "standstill-bun",
+  "module": "index.ts",
+  "type": "module",
+  "devDependencies": {
+    "bun-types": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "install": "^0.13.0",
+    "lodash": "^4.17.21",
+    "popular-english-words": "^1.0.2",
+    "word-list": "^3.1.0"
+  }
+}
