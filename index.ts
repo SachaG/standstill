@@ -1,6 +1,8 @@
 import uniq from "lodash/uniq";
 import sortBy from "lodash/sortBy";
 import intersection from "lodash/intersection";
+import without from "lodash/without";
+import pick from "lodash/pick";
 
 const fs = require("fs");
 const wordListPath = require("word-list");
@@ -9,7 +11,7 @@ const wordArray = fs.readFileSync(wordListPath, "utf8").split("\n");
 import { words } from "popular-english-words";
 import { logToFile } from "./log_to_file";
 
-const TOP_POPULAR_WORDS = 2000;
+const TOP_POPULAR_WORDS = 3000;
 const MINIMUM_ROOT_LENGTH = 2;
 const MAX_PREFIX_LENGTH = 3;
 
@@ -37,6 +39,7 @@ type WordByRoot = {
   root: string;
   prefixes: string[];
   prefixCount: number;
+  rootNumber?: number;
 };
 
 function getAllWordsByRoot(): WordByRoot[] {
@@ -72,6 +75,19 @@ type RootCondition = {
   prefixCount: number;
 };
 
+/*
+
+Sample set of conditions:
+
+[
+    { roots: [root1, root2], prefixCount: 2 },
+    { roots: [root2], prefixCount: 1 }
+]
+
+Note: prefixesInCommon from a condition are excluded from consideration for
+following conditions
+
+*/
 function applyRootConditions({
   previousWords,
   conditions,
@@ -86,20 +102,30 @@ function applyRootConditions({
     // filter out previously matched roots
     .filter((w) => !disallowedRoots.includes(w.root))
     .map((w) => {
+      let allPrefixesInCommon: string[] = [];
+
       const conditionMatches = conditions.map((condition) => {
         const allRoots = condition.roots;
-        const prefixesInCommon = intersection.apply(null, [
-          ...allRoots.map((r) => r.prefixes),
-          w.prefixes,
-        ]);
+        // find prefixes in common between all roots
+        // exlucing the ones already used to match previous conditions
+        const prefixesInCommon = without(
+          intersection.apply(null, [
+            ...allRoots.map((r) => r.prefixes),
+            w.prefixes,
+          ]),
+          ...allPrefixesInCommon
+        );
+
+        allPrefixesInCommon = [...allPrefixesInCommon, ...prefixesInCommon];
         const prefixesInCommonCount = prefixesInCommon.length;
         const meetsCondition = prefixesInCommonCount >= condition.prefixCount;
-        // we remove prefixes to save space when logging out combinations
+        // note: we pick specific properties to remove prefixes to save space
+        // in YAML file when logging out combinations
         const conditionWithoutPrefixes = {
           prefixCount: condition.prefixCount,
-          roots: condition.roots.map((r) => {
-            return { root: r.root, prefixCount: r.prefixCount };
-          }),
+          roots: condition.roots.map((r) =>
+            pick(r, ["root", "rootNumber", "prefixCount"])
+          ),
         };
         return {
           ...conditionWithoutPrefixes,
@@ -126,6 +152,7 @@ function findRootCombinations() {
 
   let validCombinations = [];
   for (const root1 of wordsByRoot) {
+    root1.rootNumber = 1;
     // root 2 needs
     // 4 prefixes in common with root 1
     const validRoots2 = applyRootConditions({
@@ -134,10 +161,21 @@ function findRootCombinations() {
     });
     if (validRoots2.length === 0) continue;
 
+    /*
+TODO: try not grouping conditions, e.g.
+
+    root 3 needs
+    1 prefix in common with roots 1 and 2
+    1 different prefix in common with roots 1 and 2
+    1 different prefix in common with root 2
+
+    */
+
     // root 3 needs
-    // 2 prefixes in common with roots 1/2
-    // 1 in common with 2
+    // 2 prefixes in common with roots 1 and 2
+    // 1 prefix in common with root 2
     for (const root2 of validRoots2) {
+      root2.rootNumber = 2;
       const validRoots3 = applyRootConditions({
         previousWords: [root1, root2],
         conditions: [
@@ -148,13 +186,14 @@ function findRootCombinations() {
       if (validRoots3.length === 0) continue;
 
       // root 4 needs
-      // 1 prefix in common with roots 1/2/3
-      // 1 in common with 1/2
-      // 1 in common with 2/3
-      // 1 in common with 1/3
-      // 1 in common with 1
-      // 1 in common with 3
+      // 1 prefix in common with roots 1, 2, and 3
+      // 1 prefix in common with roots 1 and 2
+      // 1 prefix in common with roots 2 and 3
+      // 1 prefix in common with roots 1 and 3
+      // 1 prefix in common with roots 1
+      // 1 prefix in common with roots 3
       for (const root3 of validRoots3) {
+        root3.rootNumber = 3;
         const validRoots4 = applyRootConditions({
           previousWords: [root1, root2, root3],
           conditions: [
@@ -169,6 +208,7 @@ function findRootCombinations() {
         if (validRoots4.length === 0) continue;
 
         for (const root4 of validRoots4) {
+          root4.rootNumber = 4;
           validCombinations.push({ root1, root2, root3, root4 });
         }
       }
@@ -177,37 +217,8 @@ function findRootCombinations() {
   return validCombinations;
 }
 
-function getCombinations(words: string[]) {
-  // get 1-letter prefixes
-  const oneLetter = getSplitWords(words, 1);
-  // get 2-letter prefixes
-  const twoLetter = getSplitWords(words, 1);
-  // get 3-letter prefixes
-  const threeLetter = getSplitWords(words, 1);
-}
-
-const wordsByRoot = getAllWordsByRoot();
-// console.log(wordsByRoot);
-// console.log(`${wordsByRoot.length} total words`);
-
 const validCombinations = findRootCombinations();
 
 console.log(`Found ${validCombinations.length} total valid combinations`);
 logToFile("wordsByRoots.yml", getAllWordsByRoot());
 logToFile("validCombinations.json", validCombinations);
-
-// const combos3 = getWordsByPrefix(popularWords, 3);
-// console.log(combos3);
-// console.log(`Prefix length 3: ${combos3.length} total prefixes`);
-
-// const combos2 = getWordsByPrefix(popularWords, 2);
-// console.log(combos2);
-// console.log(`Prefix length 2: ${combos2.length} total prefixes`);
-
-// const combos1 = getWordsByPrefix(popularWords, 1);
-// console.log(combos1);
-// console.log(`Prefix length 1: ${combos1.length} total prefixes`);
-
-// console.log(
-//   `Total prefixes: ${combos3.length + combos2.length + combos1.length}`
-// );
